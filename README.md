@@ -284,7 +284,3 @@ A：不用擔心，工具自動偵測版本並套用正確 `pack_format`。
 ## 授權
 
 自由使用。
-
-## 致謝
-
-靈感來自 [MineAI-Modpack-Translator](https://github.com/Thedrezik/MineAI-Modpack-Translator)，本工具從零重寫並大幅擴充功能。
