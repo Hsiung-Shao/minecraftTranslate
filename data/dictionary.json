@@ -1,0 +1,27 @@
+{
+  "_comment": "Custom terminology overrides. Format: { \"English term\": { \"lang_code\": \"Translation\" } }",
+  "Redstone": {
+    "zh_tw": "紅石",
+    "zh_cn": "红石",
+    "ja_jp": "レッドストーン",
+    "ko_kr": "레드스톤"
+  },
+  "Ender Pearl": {
+    "zh_tw": "乙太珍珠",
+    "zh_cn": "末影珍珠",
+    "ja_jp": "エンダーパール",
+    "ko_kr": "엔더 진주"
+  },
+  "Netherite": {
+    "zh_tw": "乙太合金",
+    "zh_cn": "下界合金",
+    "ja_jp": "ネザライト",
+    "ko_kr": "네더라이트"
+  },
+  "Creeper": {
+    "zh_tw": "乙太蜘蛛",
+    "zh_cn": "苦力怕",
+    "ja_jp": "クリーパー",
+    "ko_kr": "크리퍼"
+  }
+}

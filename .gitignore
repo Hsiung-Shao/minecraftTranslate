@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Local config / cache / logs
+config.json
+translation_cache.db
+translation_cache.db-wal
+translation_cache.db-shm
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Project artifacts
+*.zip
+!tests/fixtures/*.zip
