@@ -33,3 +33,7 @@ Thumbs.db
 # Project artifacts
 *.zip
 !tests/fixtures/*.zip
+
+# PyInstaller build output
+build/
+dist/
