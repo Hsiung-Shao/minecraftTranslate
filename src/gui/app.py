@@ -27,6 +27,16 @@ from src.pipeline.pipeline import TranslationPipeline
 CONFIG_PATH = Path("config.json")
 
 
+def _resolve_icon_path() -> Path | None:
+    """Return bundled icon.ico path, handling PyInstaller frozen layout."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent.parent.parent
+    candidate = base / "assets" / "icon.ico"
+    return candidate if candidate.is_file() else None
+
+
 class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
@@ -35,6 +45,13 @@ class App(ctk.CTk):
         self.geometry("1200x760")
         self.minsize(980, 620)
         self.configure(fg_color=COLORS["bg_dark"])
+
+        icon_path = _resolve_icon_path()
+        if icon_path:
+            try:
+                self.iconbitmap(str(icon_path))
+            except Exception:
+                pass
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
