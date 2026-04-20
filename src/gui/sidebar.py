@@ -11,7 +11,23 @@ from src.core.models import LANGUAGES
 from src.gui.theme import COLORS, FONTS
 
 
-class SidebarPanel(ctk.CTkScrollableFrame):
+class SidebarPanel(ctk.CTkFrame):
+    """Tabbed control panel.
+
+    Three tabs keep the UI uncluttered:
+      1. 翻譯  — mods folder, language, output, main action buttons
+      2. 連線  — API provider selection
+      3. 進階  — batch size / context / workers / VRAM detect
+    """
+
+    # (名稱, provider, url, 預設模型)
+    API_PRESETS: list[tuple[str, str, str, str]] = [
+        ("LM Studio (本機)", "local", "http://localhost:1234/v1", ""),
+        ("Ollama (本機)", "local", "http://localhost:11434/v1", ""),
+        ("Google Translate (免費)", "google", "", ""),
+        ("自訂 (本機 OpenAI 相容)", "local", "", ""),
+    ]
+
     def __init__(
         self,
         parent: ctk.CTkBaseClass,
@@ -24,9 +40,7 @@ class SidebarPanel(ctk.CTkScrollableFrame):
         on_cancel: Callable,
         on_log: Callable[[str, str], None] | None = None,
     ) -> None:
-        super().__init__(
-            parent, fg_color=COLORS["bg_panel"], width=320,
-        )
+        super().__init__(parent, fg_color=COLORS["bg_panel"], width=340)
         self.config = config
         self._on_test_connection = on_test_connection
         self._on_analyze = on_analyze
@@ -36,92 +50,366 @@ class SidebarPanel(ctk.CTkScrollableFrame):
         self._on_cancel = on_cancel
         self._on_log = on_log or (lambda msg, lvl: None)
 
-        self._build_connection_section()
-        self._build_source_section()
-        self._build_language_section()
-        self._build_output_section()
-        self._build_settings_section()
-        self._build_progress_section()
-        self._build_action_buttons()
+        self._build_header()
+        self._build_tabs()
+        self._build_progress()
+        self._build_action_bar()
 
-        # Auto-fill output folder on startup if mods_folder is already set
-        from pathlib import Path
         if self.config.mods_folder:
             mods_path = Path(self.config.mods_folder)
             if mods_path.is_dir():
                 self._auto_detect_resourcepacks(mods_path)
 
-    def _make_section_label(self, text: str) -> None:
-        ctk.CTkLabel(
-            self, text=text, font=FONTS["heading"],
-            text_color=COLORS["accent"],
-        ).pack(padx=15, pady=(15, 5), anchor="w")
-        ctk.CTkFrame(
-            self, height=1, fg_color=COLORS["border"],
-        ).pack(fill="x", padx=15, pady=(0, 8))
+    # ─── Layout scaffolding ──────────────────────────────────────────
 
-    # (名稱, provider, url, 預設模型)
-    API_PRESETS: list[tuple[str, str, str, str]] = [
-        ("LM Studio (本機)", "local", "http://localhost:1234/v1", ""),
-        ("Ollama (本機)", "local", "http://localhost:11434/v1", ""),
-        ("Google Translate (免費)", "google", "", ""),
-        ("自訂 (本機 OpenAI 相容)", "local", "", ""),
-    ]
-
-    def _build_connection_section(self) -> None:
-        self._make_section_label("API 連線設定")
+    def _build_header(self) -> None:
+        header = ctk.CTkFrame(self, fg_color="transparent", height=60)
+        header.pack(fill="x", padx=20, pady=(18, 8))
 
         ctk.CTkLabel(
-            self, text="服務商:", font=FONTS["body"],
-            text_color=COLORS["text_dim"],
-        ).pack(padx=15, anchor="w")
+            header,
+            text="MC 翻譯工具",
+            font=FONTS["display"],
+            text_color=COLORS["text"],
+            anchor="w",
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            header,
+            text="使用 AI 翻譯 Minecraft 模組",
+            font=FONTS["small"],
+            text_color=COLORS["text_muted"],
+            anchor="w",
+        ).pack(anchor="w")
 
+    def _build_tabs(self) -> None:
+        self.tabs = ctk.CTkTabview(
+            self,
+            fg_color=COLORS["bg_panel_2"],
+            segmented_button_fg_color=COLORS["bg_panel"],
+            segmented_button_selected_color=COLORS["accent"],
+            segmented_button_selected_hover_color=COLORS["accent_hover"],
+            segmented_button_unselected_color=COLORS["bg_panel"],
+            segmented_button_unselected_hover_color=COLORS["bg_hover"],
+            text_color=COLORS["text"],
+        )
+        self.tabs.pack(fill="both", expand=True, padx=14, pady=(0, 8))
+
+        self.tabs.add("翻譯")
+        self.tabs.add("連線")
+        self.tabs.add("進階")
+
+        self._build_translate_tab(self.tabs.tab("翻譯"))
+        self._build_connection_tab(self.tabs.tab("連線"))
+        self._build_advanced_tab(self.tabs.tab("進階"))
+
+    # ─── Tab 1: Translate (main flow) ────────────────────────────────
+
+    def _build_translate_tab(self, parent) -> None:
+        scroll = ctk.CTkScrollableFrame(
+            parent, fg_color="transparent",
+            scrollbar_button_color=COLORS["border"],
+        )
+        scroll.pack(fill="both", expand=True)
+
+        # Mods folder card
+        self._card_label(scroll, "MODS 資料夾")
+        folder_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        folder_frame.pack(fill="x", padx=4, pady=(0, 4))
+        self.folder_entry = self._entry(folder_frame)
+        self.folder_entry.pack(side="left", fill="x", expand=True)
+        if self.config.mods_folder:
+            self.folder_entry.insert(0, self.config.mods_folder)
+        self._icon_button(folder_frame, "📂", self._browse_folder).pack(side="right", padx=(6, 0))
+
+        # Language
+        self._card_label(scroll, "目標語言", pady_top=16)
+        lang_names = [
+            f"{lang.native_name} ({lang.code})" for lang in LANGUAGES.values()
+        ]
+        self.lang_var = ctk.StringVar()
+        default_lang = LANGUAGES.get(self.config.target_language)
+        if default_lang:
+            self.lang_var.set(f"{default_lang.native_name} ({default_lang.code})")
+        elif lang_names:
+            self.lang_var.set(lang_names[0])
+        ctk.CTkOptionMenu(
+            scroll, variable=self.lang_var, values=lang_names,
+            font=FONTS["body"],
+            fg_color=COLORS["bg_input"], button_color=COLORS["border"],
+            button_hover_color=COLORS["bg_hover"],
+            dropdown_fg_color=COLORS["bg_panel_2"],
+        ).pack(fill="x", padx=4, pady=(0, 4))
+
+        # Output
+        self._card_label(scroll, "輸出資料夾", pady_top=16)
+        output_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        output_frame.pack(fill="x", padx=4, pady=(0, 4))
+        self.output_entry = self._entry(output_frame)
+        self.output_entry.pack(side="left", fill="x", expand=True)
+        if self.config.output_folder:
+            self.output_entry.insert(0, self.config.output_folder)
+        self._icon_button(output_frame, "📂", self._browse_output).pack(side="right", padx=(6, 0))
+
+        ctk.CTkLabel(
+            scroll,
+            text="自動偵測 Minecraft 的 resourcepacks 資料夾",
+            font=FONTS["small"],
+            text_color=COLORS["text_muted"],
+        ).pack(anchor="w", padx=4, pady=(2, 0))
+
+        # Pack name (less critical, keep compact)
+        self._card_label(scroll, "資源包名稱", pady_top=16)
+        self.pack_name_entry = self._entry(scroll)
+        self.pack_name_entry.insert(0, self.config.resource_pack_name)
+        self.pack_name_entry.pack(fill="x", padx=4, pady=(0, 4))
+
+        # Hidden (kept for backward compat; pack_format is auto)
+        self.pack_format_entry = ctk.CTkEntry(scroll)
+        self.pack_format_entry.insert(0, str(self.config.pack_format))
+        self.enable_log_var = ctk.BooleanVar(value=self.config.enable_file_log)
+
+    # ─── Tab 2: Connection ───────────────────────────────────────────
+
+    def _build_connection_tab(self, parent) -> None:
+        scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        scroll.pack(fill="both", expand=True)
+
+        self._card_label(scroll, "翻譯服務商")
         preset_names = [p[0] for p in self.API_PRESETS]
         self._preset_var = ctk.StringVar(value=self._detect_preset())
-        preset_menu = ctk.CTkOptionMenu(
-            self, variable=self._preset_var,
+        ctk.CTkOptionMenu(
+            scroll, variable=self._preset_var,
             values=preset_names,
-            font=FONTS["body"], fg_color=COLORS["bg_input"],
+            font=FONTS["body"],
+            fg_color=COLORS["bg_input"], button_color=COLORS["border"],
+            button_hover_color=COLORS["bg_hover"],
+            dropdown_fg_color=COLORS["bg_panel_2"],
             command=self._on_preset_change,
-        )
-        preset_menu.pack(fill="x", padx=15, pady=(2, 5))
+        ).pack(fill="x", padx=4, pady=(0, 4))
 
         self._url_label = ctk.CTkLabel(
-            self, text="API 網址:", font=FONTS["body"],
+            scroll, text="API 網址",
+            font=FONTS["small"],
             text_color=COLORS["text_dim"],
         )
-        self._url_label.pack(padx=15, anchor="w")
-        self.url_entry = ctk.CTkEntry(
-            self, font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
+        self._url_label.pack(anchor="w", padx=4, pady=(14, 2))
+        self.url_entry = self._entry(scroll)
         self.url_entry.insert(0, self.config.api_url)
-        self.url_entry.pack(fill="x", padx=15, pady=(2, 5))
+        self.url_entry.pack(fill="x", padx=4, pady=(0, 4))
 
-        # Hidden fields kept for backward compat
-        self.api_key_entry = ctk.CTkEntry(
-            self, font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
+        # hidden api_key / model
+        self.api_key_entry = ctk.CTkEntry(scroll)
         if self.config.api_key:
             self.api_key_entry.insert(0, self.config.api_key)
         self.model_var = ctk.StringVar(value=self.config.api_model or "自動")
 
-        self.test_btn = ctk.CTkButton(
-            self, text="測試連線", font=FONTS["body"],
-            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+        ctk.CTkButton(
+            scroll, text="🔌  測試連線", font=FONTS["body_bold"],
+            fg_color=COLORS["secondary"], hover_color=COLORS["secondary_hover"],
+            text_color=COLORS["text"], height=36,
             command=self._on_test_connection,
-        )
-        self.test_btn.pack(fill="x", padx=15, pady=(2, 8))
+        ).pack(fill="x", padx=4, pady=(14, 6))
 
         self.connection_status = ctk.CTkLabel(
-            self, text="", font=FONTS["small"],
+            scroll, text="", font=FONTS["small"],
         )
-        self.connection_status.pack(padx=15, anchor="w")
+        self.connection_status.pack(anchor="w", padx=4)
+
+        # Tip card
+        tip = ctk.CTkFrame(scroll, fg_color=COLORS["bg_panel"])
+        tip.pack(fill="x", padx=4, pady=(20, 4))
+        ctk.CTkLabel(
+            tip, text="💡 提示",
+            font=FONTS["body_bold"],
+            text_color=COLORS["info"],
+        ).pack(anchor="w", padx=10, pady=(8, 2))
+        ctk.CTkLabel(
+            tip,
+            text=(
+                "本機 LLM：開啟 LM Studio 載入模型，啟動 Server\n"
+                "Google Translate：不需任何設定，點測試即可使用"
+            ),
+            font=FONTS["small"],
+            text_color=COLORS["text_dim"],
+            justify="left",
+            wraplength=270,
+        ).pack(anchor="w", padx=10, pady=(0, 10))
 
         self._update_url_visibility()
 
+    # ─── Tab 3: Advanced ─────────────────────────────────────────────
+
+    def _build_advanced_tab(self, parent) -> None:
+        scroll = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        scroll.pack(fill="both", expand=True)
+
+        ctk.CTkButton(
+            scroll, text="🎯  偵測 VRAM 自動設定", font=FONTS["body_bold"],
+            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+            height=38, command=self._on_detect_vram,
+        ).pack(fill="x", padx=4, pady=(4, 14))
+
+        self._labeled_entry(scroll, "批次大小", "batch_size_entry",
+                             str(self.config.batch_size))
+        self._labeled_entry(scroll, "溫度 (0-2)", "temp_entry",
+                             str(self.config.temperature))
+        self._labeled_entry(scroll, "並行工作數", "workers_entry",
+                             str(self.config.max_workers))
+        self._labeled_entry(scroll, "Context 長度 (tokens)", "context_entry",
+                             str(self.config.context_tokens))
+
+        # Info card
+        info = ctk.CTkFrame(scroll, fg_color=COLORS["bg_panel"])
+        info.pack(fill="x", padx=4, pady=(20, 4))
+        ctk.CTkLabel(
+            info, text="📊 推薦設定",
+            font=FONTS["body_bold"],
+            text_color=COLORS["secondary"],
+        ).pack(anchor="w", padx=10, pady=(8, 2))
+        ctk.CTkLabel(
+            info,
+            text=(
+                "< 6 GB    → 8 / 4096 / 1\n"
+                "6-12 GB   → 15 / 8192 / 2\n"
+                "12-24 GB  → 20 / 16384 / 2\n"
+                "> 24 GB   → 30 / 32768 / 3\n"
+                "(批次 / context / workers)"
+            ),
+            font=FONTS["mono_sm"],
+            text_color=COLORS["text_dim"],
+            justify="left",
+        ).pack(anchor="w", padx=10, pady=(0, 10))
+
+    # ─── Progress + actions (always visible below tabs) ──────────────
+
+    def _build_progress(self) -> None:
+        box = ctk.CTkFrame(self, fg_color=COLORS["bg_panel_2"])
+        box.pack(fill="x", padx=14, pady=(0, 8))
+
+        ctk.CTkLabel(
+            box, text="進度", font=FONTS["heading"],
+            text_color=COLORS["text_dim"],
+        ).pack(anchor="w", padx=12, pady=(10, 4))
+
+        self.progress_bar = ctk.CTkProgressBar(
+            box, fg_color=COLORS["bg_input"],
+            progress_color=COLORS["accent"],
+            height=8,
+        )
+        self.progress_bar.pack(fill="x", padx=12, pady=(0, 4))
+        self.progress_bar.set(0)
+
+        self.status_label = ctk.CTkLabel(
+            box, text="尚未開始", font=FONTS["small"],
+            text_color=COLORS["text_dim"],
+        )
+        self.status_label.pack(anchor="w", padx=12)
+
+        self.batch_progress_bar = ctk.CTkProgressBar(
+            box, fg_color=COLORS["bg_input"],
+            progress_color=COLORS["secondary"],
+            height=6,
+        )
+        self.batch_progress_bar.pack(fill="x", padx=12, pady=(6, 2))
+        self.batch_progress_bar.set(0)
+
+        self.batch_status_label = ctk.CTkLabel(
+            box, text="", font=FONTS["small"],
+            text_color=COLORS["text_muted"],
+        )
+        self.batch_status_label.pack(anchor="w", padx=12)
+        self.stats_label = ctk.CTkLabel(
+            box, text="", font=FONTS["small"],
+            text_color=COLORS["text_muted"],
+        )
+        self.stats_label.pack(anchor="w", padx=12, pady=(0, 10))
+
+    def _build_action_bar(self) -> None:
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.pack(fill="x", padx=14, pady=(0, 14))
+
+        # Primary: Start
+        self.start_btn = ctk.CTkButton(
+            bar, text="▶  開始翻譯", font=FONTS["body_bold"],
+            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
+            text_color=COLORS["text"], height=40,
+            command=self._on_start,
+        )
+        self.start_btn.pack(fill="x", pady=(0, 6))
+
+        # Secondary row
+        sec = ctk.CTkFrame(bar, fg_color="transparent")
+        sec.pack(fill="x", pady=(0, 6))
+        self.analyze_btn = ctk.CTkButton(
+            sec, text="🔍  分析", font=FONTS["body"],
+            fg_color=COLORS["bg_panel_2"], hover_color=COLORS["bg_hover"],
+            height=32, command=self._on_analyze,
+        )
+        self.analyze_btn.pack(side="left", fill="x", expand=True, padx=(0, 3))
+        self.select_btn = ctk.CTkButton(
+            sec, text="✓  選擇模組", font=FONTS["body"],
+            fg_color=COLORS["bg_panel_2"], hover_color=COLORS["bg_hover"],
+            height=32, command=self._on_select_mods, state="disabled",
+        )
+        self.select_btn.pack(side="right", fill="x", expand=True, padx=(3, 0))
+
+        # Pause / Cancel row
+        ctrl = ctk.CTkFrame(bar, fg_color="transparent")
+        ctrl.pack(fill="x")
+        self.pause_btn = ctk.CTkButton(
+            ctrl, text="⏸ 暫停", font=FONTS["small"],
+            fg_color=COLORS["bg_panel_2"], hover_color=COLORS["bg_hover"],
+            height=28, command=self._on_pause, state="disabled",
+        )
+        self.pause_btn.pack(side="left", fill="x", expand=True, padx=(0, 3))
+        self.cancel_btn = ctk.CTkButton(
+            ctrl, text="✕ 取消", font=FONTS["small"],
+            fg_color=COLORS["bg_panel_2"], hover_color=COLORS["error"],
+            height=28, command=self._on_cancel, state="disabled",
+        )
+        self.cancel_btn.pack(side="right", fill="x", expand=True, padx=(3, 0))
+
+    # ─── Reusable widget helpers ─────────────────────────────────────
+
+    def _card_label(self, parent, text: str, pady_top: int = 8) -> None:
+        ctk.CTkLabel(
+            parent, text=text, font=FONTS["heading"],
+            text_color=COLORS["text_dim"],
+            anchor="w",
+        ).pack(anchor="w", padx=4, pady=(pady_top, 4))
+
+    def _entry(self, parent) -> ctk.CTkEntry:
+        return ctk.CTkEntry(
+            parent,
+            font=FONTS["body"],
+            fg_color=COLORS["bg_input"],
+            border_color=COLORS["border"],
+            text_color=COLORS["text"],
+            height=32,
+        )
+
+    def _labeled_entry(self, parent, label: str, attr: str, default: str) -> None:
+        ctk.CTkLabel(
+            parent, text=label, font=FONTS["small"],
+            text_color=COLORS["text_dim"],
+            anchor="w",
+        ).pack(anchor="w", padx=4, pady=(4, 2))
+        entry = self._entry(parent)
+        entry.insert(0, default)
+        entry.pack(fill="x", padx=4, pady=(0, 4))
+        setattr(self, attr, entry)
+
+    def _icon_button(self, parent, text: str, command: Callable) -> ctk.CTkButton:
+        return ctk.CTkButton(
+            parent, text=text, width=36, height=32, font=FONTS["body"],
+            fg_color=COLORS["bg_panel_2"], hover_color=COLORS["bg_hover"],
+            command=command,
+        )
+
+    # ─── Preset / connection helpers ─────────────────────────────────
+
     def _detect_preset(self) -> str:
         provider = self.config.api_provider
-        # Handle legacy config values
         if provider == "openai_compat":
             provider = "local"
         url = self.config.api_url
@@ -149,10 +437,10 @@ class SidebarPanel(ctk.CTkScrollableFrame):
         preset = self._preset_var.get()
         provider, _, _ = self._get_preset_info(preset)
         if provider == "google":
-            self._url_label.configure(text="（Google Translate 不需 URL）")
+            self._url_label.configure(text="API 網址 (Google Translate 不需填)")
             self.url_entry.configure(state="disabled")
         else:
-            self._url_label.configure(text="API 網址:")
+            self._url_label.configure(text="API 網址")
             self.url_entry.configure(state="normal")
 
     def _get_selected_provider(self) -> str:
@@ -160,230 +448,9 @@ class SidebarPanel(ctk.CTkScrollableFrame):
         provider, _, _ = self._get_preset_info(preset)
         return provider
 
-    def _build_source_section(self) -> None:
-        self._make_section_label("Mods 資料夾")
-
-        folder_frame = ctk.CTkFrame(self, fg_color="transparent")
-        folder_frame.pack(fill="x", padx=15, pady=(2, 5))
-
-        self.folder_entry = ctk.CTkEntry(
-            folder_frame, font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
-        self.folder_entry.pack(side="left", fill="x", expand=True)
-        if self.config.mods_folder:
-            self.folder_entry.insert(0, self.config.mods_folder)
-
-        ctk.CTkButton(
-            folder_frame, text="...", width=40, font=FONTS["body"],
-            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
-            command=self._browse_folder,
-        ).pack(side="right", padx=(5, 0))
-
-    def _build_language_section(self) -> None:
-        self._make_section_label("目標語言")
-
-        lang_names = [
-            f"{lang.native_name} ({lang.code})" for lang in LANGUAGES.values()
-        ]
-        self.lang_var = ctk.StringVar()
-
-        default_lang = LANGUAGES.get(self.config.target_language)
-        if default_lang:
-            self.lang_var.set(f"{default_lang.native_name} ({default_lang.code})")
-        elif lang_names:
-            self.lang_var.set(lang_names[0])
-
-        self.lang_dropdown = ctk.CTkOptionMenu(
-            self, variable=self.lang_var, values=lang_names,
-            font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
-        self.lang_dropdown.pack(fill="x", padx=15, pady=(2, 5))
-
-    def _build_output_section(self) -> None:
-        self._make_section_label("輸出設定")
-
-        ctk.CTkLabel(
-            self, text="資源包名稱:", font=FONTS["body"],
-            text_color=COLORS["text_dim"],
-        ).pack(padx=15, anchor="w")
-        self.pack_name_entry = ctk.CTkEntry(
-            self, font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
-        self.pack_name_entry.insert(0, self.config.resource_pack_name)
-        self.pack_name_entry.pack(fill="x", padx=15, pady=(2, 5))
-
-        # Hidden: pack_format is auto-detected from game dir during scan.
-        self.pack_format_entry = ctk.CTkEntry(
-            self, font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
-        self.pack_format_entry.insert(0, str(self.config.pack_format))
-
-        ctk.CTkLabel(
-            self, text="輸出資料夾:", font=FONTS["body"],
-            text_color=COLORS["text_dim"],
-        ).pack(padx=15, anchor="w")
-
-        output_frame = ctk.CTkFrame(self, fg_color="transparent")
-        output_frame.pack(fill="x", padx=15, pady=(2, 5))
-
-        self.output_entry = ctk.CTkEntry(
-            output_frame, font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
-        self.output_entry.pack(side="left", fill="x", expand=True)
-        if self.config.output_folder:
-            self.output_entry.insert(0, self.config.output_folder)
-
-        ctk.CTkButton(
-            output_frame, text="...", width=40, font=FONTS["body"],
-            fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"],
-            command=self._browse_output,
-        ).pack(side="right", padx=(5, 0))
-
-        # Log output is always enabled but UI controls are hidden
-        self.enable_log_var = ctk.BooleanVar(value=self.config.enable_file_log)
-
-    def _build_settings_section(self) -> None:
-        self._make_section_label("翻譯設定")
-
-        ctk.CTkLabel(
-            self, text="批次大小:", font=FONTS["body"],
-            text_color=COLORS["text_dim"],
-        ).pack(padx=15, anchor="w")
-        self.batch_size_entry = ctk.CTkEntry(
-            self, font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
-        self.batch_size_entry.insert(0, str(self.config.batch_size))
-        self.batch_size_entry.pack(fill="x", padx=15, pady=(2, 5))
-
-        ctk.CTkLabel(
-            self, text="溫度:", font=FONTS["body"],
-            text_color=COLORS["text_dim"],
-        ).pack(padx=15, anchor="w")
-        self.temp_entry = ctk.CTkEntry(
-            self, font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
-        self.temp_entry.insert(0, str(self.config.temperature))
-        self.temp_entry.pack(fill="x", padx=15, pady=(2, 5))
-
-        ctk.CTkLabel(
-            self, text="並行工作數:", font=FONTS["body"],
-            text_color=COLORS["text_dim"],
-        ).pack(padx=15, anchor="w")
-        self.workers_entry = ctk.CTkEntry(
-            self, font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
-        self.workers_entry.insert(0, str(self.config.max_workers))
-        self.workers_entry.pack(fill="x", padx=15, pady=(2, 5))
-
-        ctk.CTkLabel(
-            self, text="Context 長度 (tokens):", font=FONTS["body"],
-            text_color=COLORS["text_dim"],
-        ).pack(padx=15, anchor="w")
-        self.context_entry = ctk.CTkEntry(
-            self, font=FONTS["body"], fg_color=COLORS["bg_input"],
-        )
-        self.context_entry.insert(0, str(self.config.context_tokens))
-        self.context_entry.pack(fill="x", padx=15, pady=(2, 5))
-
-        self.detect_vram_btn = ctk.CTkButton(
-            self, text="偵測 VRAM 自動設定", font=FONTS["body"],
-            fg_color=COLORS["info"], hover_color="#5ba8c3",
-            command=self._on_detect_vram,
-        )
-        self.detect_vram_btn.pack(fill="x", padx=15, pady=(5, 5))
-
-    def _build_progress_section(self) -> None:
-        self._make_section_label("翻譯進度")
-
-        ctk.CTkLabel(
-            self, text="總進度 (模組):", font=FONTS["small"],
-            text_color=COLORS["text_dim"],
-        ).pack(padx=15, anchor="w")
-
-        self.progress_bar = ctk.CTkProgressBar(
-            self, fg_color=COLORS["bg_input"],
-            progress_color=COLORS["success"],
-        )
-        self.progress_bar.pack(fill="x", padx=15, pady=(2, 2))
-        self.progress_bar.set(0)
-
-        self.status_label = ctk.CTkLabel(
-            self, text="就緒", font=FONTS["small"],
-            text_color=COLORS["text_dim"],
-        )
-        self.status_label.pack(padx=15, anchor="w")
-
-        ctk.CTkLabel(
-            self, text="目前模組進度 (批次):", font=FONTS["small"],
-            text_color=COLORS["text_dim"],
-        ).pack(padx=15, pady=(8, 0), anchor="w")
-
-        self.batch_progress_bar = ctk.CTkProgressBar(
-            self, fg_color=COLORS["bg_input"],
-            progress_color=COLORS["info"],
-        )
-        self.batch_progress_bar.pack(fill="x", padx=15, pady=(2, 2))
-        self.batch_progress_bar.set(0)
-
-        self.batch_status_label = ctk.CTkLabel(
-            self, text="", font=FONTS["small"],
-            text_color=COLORS["text_dim"],
-        )
-        self.batch_status_label.pack(padx=15, anchor="w")
-
-        self.stats_label = ctk.CTkLabel(
-            self, text="", font=FONTS["small"],
-            text_color=COLORS["text_dim"],
-        )
-        self.stats_label.pack(padx=15, pady=(4, 0), anchor="w")
-
-    def _build_action_buttons(self) -> None:
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=15, pady=(10, 5))
-
-        self.analyze_btn = ctk.CTkButton(
-            btn_frame, text="分析", font=FONTS["body"],
-            fg_color=COLORS["bg_input"], hover_color=COLORS["border"],
-            command=self._on_analyze,
-        )
-        self.analyze_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
-
-        self.select_btn = ctk.CTkButton(
-            btn_frame, text="選擇模組", font=FONTS["body"],
-            fg_color=COLORS["info"], hover_color="#5ba8c3",
-            command=self._on_select_mods, state="disabled",
-        )
-        self.select_btn.pack(side="left", expand=True, fill="x", padx=(5, 0))
-
-        start_frame = ctk.CTkFrame(self, fg_color="transparent")
-        start_frame.pack(fill="x", padx=15, pady=(5, 5))
-
-        self.start_btn = ctk.CTkButton(
-            start_frame, text="翻譯全部", font=FONTS["body"],
-            fg_color=COLORS["success"], hover_color="#3db88f",
-            command=self._on_start,
-        )
-        self.start_btn.pack(fill="x")
-
-        ctrl_frame = ctk.CTkFrame(self, fg_color="transparent")
-        ctrl_frame.pack(fill="x", padx=15, pady=(5, 15))
-
-        self.pause_btn = ctk.CTkButton(
-            ctrl_frame, text="暫停", font=FONTS["body"],
-            fg_color=COLORS["warning"], hover_color="#d99400",
-            command=self._on_pause, state="disabled",
-        )
-        self.pause_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
-
-        self.cancel_btn = ctk.CTkButton(
-            ctrl_frame, text="取消", font=FONTS["body"],
-            fg_color=COLORS["error"], hover_color=COLORS["accent_hover"],
-            command=self._on_cancel, state="disabled",
-        )
-        self.cancel_btn.pack(side="left", expand=True, fill="x", padx=(5, 0))
+    # ─── File dialogs ────────────────────────────────────────────────
 
     def _browse_folder(self) -> None:
-        from pathlib import Path
         path = filedialog.askdirectory(title="選擇 mods 資料夾")
         if path:
             self.folder_entry.delete(0, "end")
@@ -391,10 +458,6 @@ class SidebarPanel(ctk.CTkScrollableFrame):
             self._auto_detect_resourcepacks(Path(path))
 
     def _auto_detect_resourcepacks(self, mods_folder) -> None:
-        """Detect the Minecraft resourcepacks folder from the mods folder path
-        and auto-fill the output folder if it's empty or still a default.
-        """
-        from pathlib import Path
         rp_dir: Path | None = None
         if mods_folder.name == "mods":
             candidate = mods_folder.parent / "resourcepacks"
@@ -407,7 +470,6 @@ class SidebarPanel(ctk.CTkScrollableFrame):
 
         if rp_dir:
             current = self.output_entry.get().strip()
-            # Only overwrite if empty or pointing to non-existent path
             if not current or not Path(current).is_dir():
                 self.output_entry.delete(0, "end")
                 self.output_entry.insert(0, str(rp_dir))
@@ -422,22 +484,7 @@ class SidebarPanel(ctk.CTkScrollableFrame):
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, path)
 
-    def _open_log_folder(self) -> None:
-        import os
-        import subprocess
-        import sys
-        from pathlib import Path
-        log_dir = Path(self.config.log_folder or "logs").resolve()
-        log_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            if sys.platform == "win32":
-                os.startfile(str(log_dir))
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", str(log_dir)])
-            else:
-                subprocess.Popen(["xdg-open", str(log_dir)])
-        except Exception as e:
-            self._on_log(f"無法開啟資料夾: {e}", "error")
+    # ─── Config bundling ─────────────────────────────────────────────
 
     def get_selected_lang_code(self) -> str:
         text = self.lang_var.get()
@@ -447,30 +494,17 @@ class SidebarPanel(ctk.CTkScrollableFrame):
         return "zh_tw"
 
     def collect_config(self) -> AppConfig:
-        try:
-            batch_size = int(self.batch_size_entry.get())
-        except ValueError:
-            batch_size = 10
-        try:
-            temperature = float(self.temp_entry.get())
-        except ValueError:
-            temperature = 0.1
-        try:
-            pack_format = int(self.pack_format_entry.get())
-        except ValueError:
-            pack_format = 15
+        def _int(entry, default):
+            try:
+                return int(entry.get())
+            except ValueError:
+                return default
 
-        try:
-            max_workers = int(self.workers_entry.get())
-        except ValueError:
-            max_workers = 2
-
-        try:
-            context_tokens = int(self.context_entry.get())
-        except ValueError:
-            context_tokens = 8192
-
-        enable_file_log = bool(self.enable_log_var.get())
+        def _float(entry, default):
+            try:
+                return float(entry.get())
+            except ValueError:
+                return default
 
         model = self.model_var.get()
         if model in ("auto", "自動"):
@@ -485,14 +519,16 @@ class SidebarPanel(ctk.CTkScrollableFrame):
             mods_folder=self.folder_entry.get().strip(),
             output_folder=self.output_entry.get().strip(),
             resource_pack_name=self.pack_name_entry.get().strip() or "ModTranslation",
-            pack_format=pack_format,
-            batch_size=max(1, batch_size),
-            temperature=max(0.0, min(2.0, temperature)),
+            pack_format=_int(self.pack_format_entry, 15),
+            batch_size=max(1, _int(self.batch_size_entry, 10)),
+            temperature=max(0.0, min(2.0, _float(self.temp_entry, 0.1))),
             max_retries=3,
-            max_workers=max(1, min(8, max_workers)),
-            context_tokens=max(1024, context_tokens),
-            enable_file_log=enable_file_log,
+            max_workers=max(1, min(8, _int(self.workers_entry, 2))),
+            context_tokens=max(1024, _int(self.context_entry, 8192)),
+            enable_file_log=bool(self.enable_log_var.get()),
         )
+
+    # ─── VRAM detect ─────────────────────────────────────────────────
 
     def _on_detect_vram(self) -> None:
         from src.hardware.vram_detector import detect_gpu, recommend_settings
@@ -503,9 +539,7 @@ class SidebarPanel(ctk.CTkScrollableFrame):
             self._on_log("未偵測到 GPU，請手動設定", "warning")
             return
 
-        self._on_log(
-            f"偵測到 GPU: {info.name} ({info.vram_mb} MB)", "success"
-        )
+        self._on_log(f"偵測到 GPU: {info.name} ({info.vram_mb} MB)", "success")
         rec = recommend_settings(info.vram_mb)
         self._on_log(rec.model_hint, "info")
         self._on_log(
@@ -522,6 +556,8 @@ class SidebarPanel(ctk.CTkScrollableFrame):
         self.workers_entry.insert(0, str(rec.max_workers))
         self._on_log("已自動套用，可手動微調", "success")
 
+    # ─── State updates called from app.py ────────────────────────────
+
     def set_running_state(self, running: bool) -> None:
         state = "disabled" if running else "normal"
         self.start_btn.configure(state=state)
@@ -530,7 +566,6 @@ class SidebarPanel(ctk.CTkScrollableFrame):
         self.url_entry.configure(state=state)
         self.api_key_entry.configure(state=state)
         self.folder_entry.configure(state=state)
-        self.test_btn.configure(state=state)
 
         ctrl_state = "normal" if running else "disabled"
         self.pause_btn.configure(state=ctrl_state)
@@ -547,12 +582,11 @@ class SidebarPanel(ctk.CTkScrollableFrame):
         if batch_total > 0:
             self.batch_progress_bar.set(batch_current / batch_total)
         self.batch_status_label.configure(
-            text=f"{mod_name}: 批次 {batch_current}/{batch_total}，"
+            text=f"{mod_name} — 批次 {batch_current}/{batch_total}，"
                  f"字串 {strings_done}/{strings_total}"
         )
         self.stats_label.configure(
-            text=f"快取命中: {cache_hits} | "
-                 f"API 翻譯: {strings_done - cache_hits}"
+            text=f"快取命中 {cache_hits} │ API {strings_done - cache_hits}"
         )
 
     def reset_batch_progress(self) -> None:
@@ -561,17 +595,16 @@ class SidebarPanel(ctk.CTkScrollableFrame):
         self.stats_label.configure(text="")
 
     def update_models(self, models: list[str]) -> None:
-        values = ["自動"] + models
-        self.model_dropdown.configure(values=values)
+        pass  # Model dropdown removed
 
     def set_connection_status(self, connected: bool, message: str = "") -> None:
         if connected:
             self.connection_status.configure(
-                text=message or "已連線",
+                text=f"● {message or '已連線'}",
                 text_color=COLORS["success"],
             )
         else:
             self.connection_status.configure(
-                text=message or "未連線",
+                text=f"● {message or '未連線'}",
                 text_color=COLORS["error"],
             )

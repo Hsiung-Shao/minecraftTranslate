@@ -32,8 +32,8 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Minecraft MOD 翻譯工具")
-        self.geometry("1100x700")
-        self.minsize(900, 500)
+        self.geometry("1200x760")
+        self.minsize(980, 620)
         self.configure(fg_color=COLORS["bg_dark"])
 
         ctk.set_appearance_mode("dark")
@@ -74,10 +74,10 @@ class App(ctk.CTk):
             on_cancel=self._cancel,
             on_log=lambda msg, lvl: self.console.append(msg, lvl),
         )
-        self.sidebar.grid(row=0, column=0, sticky="nsw", padx=(10, 5), pady=10)
+        self.sidebar.grid(row=0, column=0, sticky="nsw", padx=(12, 6), pady=12)
 
         self.console = ConsolePanel(main_frame)
-        self.console.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
+        self.console.grid(row=0, column=1, sticky="nsew", padx=(6, 12), pady=12)
 
     def _test_connection(self) -> None:
         config = self.sidebar.collect_config()
