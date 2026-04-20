@@ -41,9 +41,23 @@
 
 ## 安裝
 
+### 🟢 方式 A：直接下載 .exe（推薦一般使用者）
+
+**不需要安裝 Python 或任何依賴，下載一個檔案雙擊就能用。**
+
+1. 前往 [Releases 頁面](https://github.com/Hsiung-Shao/minecraftTranslate/releases/latest)
+2. 下載 `MinecraftTranslate.exe`（約 24 MB）
+3. 雙擊執行即可
+
+> 💡 Windows 首次執行可能跳出 SmartScreen 警示（因 exe 未簽章），點「**其他資訊** → **仍要執行**」即可。
+
+跳到下方 [**快速開始**](#快速開始) 章節。
+
+### 🛠️ 方式 B：從原始碼執行（開發者/自行修改）
+
 ```bash
 # 1. 下載專案
-git clone <repo-url>
+git clone https://github.com/Hsiung-Shao/minecraftTranslate.git
 cd minecraftTranslate
 
 # 2. 建立虛擬環境（建議）
@@ -59,6 +73,9 @@ pip install -r requirements.txt
 
 ## 快速開始
 
+**方式 A（.exe）**：雙擊 `MinecraftTranslate.exe`
+
+**方式 B（原始碼）**：
 ```bash
 python main.py
 ```
